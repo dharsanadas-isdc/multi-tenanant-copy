@@ -1,0 +1,196 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /* =========================
+       🔹 HELPER FUNCTIONS
+    ========================== */
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function userExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function userCompanyId() {
+      return userData().companyId;
+    }
+
+    function userRole() {
+      return userData().role;
+    }
+
+    function isAdmin() {
+      return userExists() && userRole() == "admin";
+    }
+
+    function isManager() {
+      return userExists() && (userRole() == "manager" || userRole() == "admin");
+    }
+
+    function belongsToSameCompany(companyId) {
+      return isAuthenticated() &&
+             userExists() &&
+             companyId == userCompanyId();
+    }
+
+    /* =========================
+       🏢 COMPANIES
+    ========================== */
+
+    match /companies/{companyId} {
+      allow read: if isAuthenticated() && (
+        (resource != null && resource.data.ownerId == request.auth.uid) ||
+        belongsToSameCompany(companyId)
+      );
+
+      allow create: if isAuthenticated() &&
+                    request.resource.data.ownerId == request.auth.uid;
+
+      allow update, delete: if isAuthenticated() &&
+                            (isAdmin() || (resource != null && resource.data.ownerId == request.auth.uid)) &&
+                            belongsToSameCompany(companyId);
+    }
+
+    /* =========================
+       👤 USERS
+    ========================== */
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        (resource != null && belongsToSameCompany(resource.data.companyId))
+      );
+
+      allow create: if isAuthenticated() && (
+        (request.auth.uid == userId) || 
+        (isManager() && 
+         request.resource.data.companyId == userCompanyId() &&
+         request.resource.data.status == 'invited' &&
+         (isAdmin() || request.resource.data.role != 'admin'))
+      );
+
+      allow update: if isAuthenticated() && (
+        (request.auth.uid == userId && 
+         request.resource.data.role == resource.data.role && 
+         request.resource.data.companyId == resource.data.companyId) || 
+        (isManager() && 
+         resource.data.companyId == userCompanyId() && 
+         request.resource.data.companyId == resource.data.companyId &&
+         (isAdmin() || request.resource.data.role != 'admin'))
+      );
+
+      allow delete: if isAuthenticated() && (
+        isAdmin() || 
+        (resource != null && 
+         resource.data.status == 'invited' && 
+         resource.data.email == request.auth.token.email)
+      );
+    }
+
+    /* =========================
+       📩 INVITES (PRODUCTION SAFE)
+    ========================== */
+
+    match /invites/{inviteId} {
+      // 1. Managers/Admins can create invites inside their company
+      allow create: if isAuthenticated() &&
+                    isManager() &&
+                    request.resource.data.companyId == userCompanyId();
+
+      // 2. Managers/Admins can read/list invites of their company
+      allow read: if isAuthenticated() &&
+                  belongsToSameCompany(resource.data.companyId);
+
+      // 3. Allow direct document fetch (get) for signup validation (even if unauthenticated)
+      allow get: if resource.data.status == "pending";
+
+      // 4. Allow the validateInviteToken query (list) even if unauthenticated.
+      // We strictly require a limit of 1 and specific filters for token, email, and pending status.
+      allow list: if request.query.limit == 1 && 
+                    'token' in request.query.filters && 
+                    'email' in request.query.filters &&
+                    'status' in request.query.filters;
+
+      // 5. Allow accepting invite (update status pending -> accepted)
+      allow update: if resource.data.status == "pending" &&
+                    request.resource.data.status == "accepted" &&
+                    request.resource.data.companyId == resource.data.companyId;
+
+      // 6. Managers/Admins can revoke invite
+      allow delete: if isAuthenticated() &&
+                    isManager() &&
+                    belongsToSameCompany(resource.data.companyId);
+    }
+
+    /* =========================
+       📁 PROJECTS
+    ========================== */
+
+    match /projects/{projectId} {
+      allow read: if isAuthenticated() && resource != null && belongsToSameCompany(resource.data.companyId);
+
+      allow create: if isAuthenticated() &&
+                    belongsToSameCompany(request.resource.data.companyId) &&
+                    (isAdmin() || isManager());
+
+      allow update: if isAuthenticated() &&
+                    resource != null &&
+                    belongsToSameCompany(resource.data.companyId) &&
+                    (isAdmin() || isManager());
+
+      allow delete: if isAuthenticated() &&
+                    resource != null &&
+                    belongsToSameCompany(resource.data.companyId) &&
+                    isAdmin();
+    }
+
+    /* =========================
+       ✅ TASKS
+    ========================== */
+
+    match /tasks/{taskId} {
+      allow read: if isAuthenticated() && resource != null && belongsToSameCompany(resource.data.companyId);
+
+      allow create: if isAuthenticated() &&
+                    belongsToSameCompany(request.resource.data.companyId) &&
+                    (isAdmin() || isManager());
+
+      allow update: if isAuthenticated() &&
+                    resource != null &&
+                    belongsToSameCompany(resource.data.companyId) &&
+                    (
+                      isAdmin() ||
+                      isManager() ||
+                      resource.data.assignedTo == request.auth.uid
+                    );
+
+      allow delete: if isAuthenticated() &&
+                    resource != null &&
+                    belongsToSameCompany(resource.data.companyId) &&
+                    (isAdmin() || isManager());
+    }
+
+    /* =========================
+       📜 ACTIVITY LOGS
+    ========================== */
+
+    match /activityLogs/{logId} {
+      allow read: if isAuthenticated() && resource != null && belongsToSameCompany(resource.data.companyId);
+
+      allow create: if isAuthenticated() && 
+                    request.resource.data.companyId != null &&
+                    (
+                      (userExists() && request.resource.data.companyId == userCompanyId()) ||
+                      (exists(/databases/$(database)/documents/companies/$(request.resource.data.companyId)) &&
+                      get(/databases/$(database)/documents/companies/$(request.resource.data.companyId)).data.ownerId == request.auth.uid)
+                    );
+    }
+  }
+}
