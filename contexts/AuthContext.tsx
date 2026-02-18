@@ -1,9 +1,9 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { UserProfile } from '../types';
+import { UserProfile, UserRole } from '../types';
 
 interface AuthContextType {
   user: User | null;
@@ -11,6 +11,7 @@ interface AuthContextType {
   loading: boolean;
   isAdmin: boolean;
   isManager: boolean;
+  isSuperAdmin: boolean;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -19,6 +20,7 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   isAdmin: false,
   isManager: false,
+  isSuperAdmin: false,
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -32,15 +34,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
       
-      // Clean up previous profile listener
       if (unsubscribeProfile) {
         unsubscribeProfile();
         unsubscribeProfile = null;
       }
 
       if (firebaseUser) {
-        // Use a real-time listener for the profile so it updates automatically
-        // after the signup process finishes creating the document.
         unsubscribeProfile = onSnapshot(
           doc(db, 'users', firebaseUser.uid),
           (snapshot) => {
@@ -52,7 +51,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setLoading(false);
           },
           (error) => {
-            // Only log if it's not a common startup permission issue
             if (error.code !== 'permission-denied') {
               console.error("Profile Listener Error:", error);
             }
@@ -75,8 +73,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     user,
     profile,
     loading,
-    isAdmin: profile?.role === 'admin',
-    isManager: profile?.role === 'manager' || profile?.role === 'admin',
+    isAdmin: profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN,
+    isManager: profile?.role === UserRole.MANAGER || profile?.role === UserRole.ADMIN || profile?.role === UserRole.SUPER_ADMIN,
+    isSuperAdmin: profile?.role === UserRole.SUPER_ADMIN,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

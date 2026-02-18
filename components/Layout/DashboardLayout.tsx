@@ -11,12 +11,13 @@ import {
   Menu, 
   Search,
   Bell,
-  ChevronRight
+  ChevronRight,
+  Globe
 } from 'lucide-react';
 import { auth } from '../../firebase';
 import { useNavigate, useLocation } from 'react-router-dom';
 
-const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
+const SidebarItem = ({ icon: Icon, label, active, onClick, color }: any) => (
   <button
     onClick={onClick}
     className={`w-full flex items-center justify-between px-4 py-3.5 rounded-2xl transition-all duration-300 group ${
@@ -26,7 +27,7 @@ const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
     }`}
   >
     <div className="flex items-center space-x-3">
-      <Icon size={18} className={`${active ? 'text-indigo-400' : 'text-slate-300 group-hover:text-slate-500'}`} />
+      <Icon size={18} className={`${active ? (color || 'text-indigo-400') : 'text-slate-300 group-hover:text-slate-500'}`} />
       <span className={`text-[11px] font-black uppercase tracking-widest ${active ? 'text-white' : 'text-slate-500'}`}>{label}</span>
     </div>
     {active && <ChevronRight size={14} className="text-slate-500" />}
@@ -34,7 +35,7 @@ const SidebarItem = ({ icon: Icon, label, active, onClick }: any) => (
 );
 
 export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { profile } = useAuth();
+  const { profile, isSuperAdmin } = useAuth();
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -46,6 +47,10 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
     { icon: Users, label: 'Directory', path: '/team' },
     { icon: Settings, label: 'Protocol', path: '/settings' },
   ];
+
+  if (isSuperAdmin) {
+    menuItems.unshift({ icon: Globe, label: 'Nexus', path: '/nexus' });
+  }
 
   const handleLogout = async () => {
     await auth.signOut();
@@ -79,6 +84,7 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
                 icon={item.icon}
                 label={item.label}
                 active={location.pathname === item.path}
+                color={item.label === 'Nexus' ? 'text-rose-400' : undefined}
                 onClick={() => {
                   navigate(item.path);
                   setSidebarOpen(false);
@@ -113,11 +119,13 @@ export const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ child
             </button>
             <div className="h-8 w-px bg-slate-100"></div>
             <div className="flex items-center space-x-4">
-              <span className="bg-indigo-50 text-indigo-600 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border border-indigo-100 shadow-sm">
+              <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border shadow-sm ${
+                isSuperAdmin ? 'bg-slate-900 text-white border-slate-900' : 'bg-indigo-50 text-indigo-600 border-indigo-100'
+              }`}>
                 {profile?.role || 'Member'}
               </span>
               <img 
-                src={`https://ui-avatars.com/api/?name=${profile?.displayName || 'User'}&background=0f172a&color=fff&bold=true`} 
+                src={`https://ui-avatars.com/api/?name=${profile?.displayName || 'User'}&background=${isSuperAdmin ? 'ef4444' : '0f172a'}&color=fff&bold=true`} 
                 className="w-10 h-10 rounded-xl shadow-sm border border-slate-100"
                 alt="Profile"
               />

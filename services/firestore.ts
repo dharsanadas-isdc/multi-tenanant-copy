@@ -14,16 +14,9 @@ import {
   getDocs
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Project, Task, UserProfile, ActivityLog, UserRole, Invite, InviteStatus } from '../types';
+import { Project, Task, UserProfile, ActivityLog, UserRole, Invite, InviteStatus, Company } from '../types';
 
-// Utility for secure token generation
-const generateInviteToken = () => {
-  return Array.from(crypto.getRandomValues(new Uint8Array(32)))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-};
-
-// Generic real-time listener
+// Generic real-time listener for multi-tenant data
 export const subscribeToCollection = <T,>(
   collectionName: string,
   companyId: string,
@@ -33,6 +26,26 @@ export const subscribeToCollection = <T,>(
   const q = query(
     collection(db, collectionName),
     where('companyId', '==', companyId),
+    ...extraQueries
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const data = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    })) as T[];
+    callback(data);
+  });
+};
+
+// Global listener for Super Admins
+export const subscribeToGlobalCollection = <T,>(
+  collectionName: string,
+  callback: (data: T[]) => void,
+  extraQueries: any[] = []
+) => {
+  const q = query(
+    collection(db, collectionName),
     ...extraQueries
   );
 
@@ -64,7 +77,9 @@ export const logActivity = async (
 
 // Invite System
 export const createInvite = async (companyId: string, email: string, role: UserRole, invitedBy: string) => {
-  const token = generateInviteToken();
+  const token = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
   const docRef = await addDoc(collection(db, 'invites'), {
     companyId,
     email: email.toLowerCase().trim(),
@@ -74,7 +89,6 @@ export const createInvite = async (companyId: string, email: string, role: UserR
     status: InviteStatus.PENDING,
     createdAt: serverTimestamp(),
   });
-  await logActivity(companyId, invitedBy, 'CREATE_INVITE', `Sent invite to ${email} as ${role}`);
   return { id: docRef.id, token };
 };
 
@@ -98,41 +112,34 @@ export const acceptInvite = async (inviteId: string) => {
   });
 };
 
-// Project operations
 export const createProject = async (data: Partial<Project>, userId: string) => {
   const docRef = await addDoc(collection(db, 'projects'), {
     ...data,
     createdAt: serverTimestamp(),
     createdBy: userId,
   });
-  await logActivity(data.companyId!, userId, 'CREATE_PROJECT', `Created project: ${data.name}`, docRef.id);
   return docRef.id;
 };
 
 export const updateProject = async (projectId: string, data: Partial<Project>, companyId: string, userId: string) => {
   await updateDoc(doc(db, 'projects', projectId), data);
-  await logActivity(companyId, userId, 'UPDATE_PROJECT', `Updated project: ${data.name}`, projectId);
 };
 
-// Task operations
 export const createTask = async (data: Partial<Task>, userId: string) => {
   const docRef = await addDoc(collection(db, 'tasks'), {
     ...data,
     createdAt: serverTimestamp(),
     createdBy: userId,
   });
-  await logActivity(data.companyId!, userId, 'CREATE_TASK', `Created task: ${data.title}`, data.projectId);
   return docRef.id;
 };
 
 export const updateTask = async (taskId: string, data: Partial<Task>, companyId: string, userId: string) => {
   await updateDoc(doc(db, 'tasks', taskId), data);
-  await logActivity(companyId, userId, 'UPDATE_TASK', `Updated task: ${data.title}`, data.projectId);
 };
 
 export const updateTaskStatus = async (taskId: string, status: string, companyId: string, userId: string) => {
   await updateDoc(doc(db, 'tasks', taskId), { status });
-  await logActivity(companyId, userId, 'UPDATE_TASK_STATUS', `Updated task status to: ${status}`);
 };
 
 export const getCompanyUsers = async (companyId: string): Promise<UserProfile[]> => {

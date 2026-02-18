@@ -8,6 +8,7 @@ import { Projects } from './pages/Projects';
 import { Tasks } from './pages/Tasks';
 import { Team } from './pages/Team';
 import { Settings } from './pages/Settings';
+import { SuperAdmin } from './pages/SuperAdmin';
 import { Login } from './pages/Login';
 
 const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -27,6 +28,7 @@ const App: React.FC = () => {
           <Route path="/tasks" element={<PrivateRoute><Tasks /></PrivateRoute>} />
           <Route path="/team" element={<PrivateRoute><Team /></PrivateRoute>} />
           <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
+          <Route path="/nexus" element={<PrivateRoute><SuperAdmin /></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Router>

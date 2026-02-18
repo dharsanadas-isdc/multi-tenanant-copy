@@ -12,23 +12,25 @@ import { doc, setDoc, getDoc, serverTimestamp, collection, addDoc } from 'fireba
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { UserRole, Invite, Company } from '../types';
 import { validateInviteToken, acceptInvite } from '../services/firestore';
-import { ShieldCheck, AlertCircle, RefreshCw, Link2, Fingerprint, LogIn, Sparkles, Building2, Settings2, User } from 'lucide-react';
+import { ShieldCheck, AlertCircle, RefreshCw, Building2, User, Key, Mail } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 type AuthMode = 'LOGIN' | 'SIGNUP' | 'JOIN';
 
+// Fix: Correctly returning JSX to satisfy the React.FC type definition which requires a return of ReactNode.
 export const Login: React.FC = () => {
+  const { user: authUser } = useAuth();
   const [searchParams] = useSearchParams();
   const urlToken = searchParams.get('token');
+  const urlEmail = searchParams.get('email');
   
   const [mode, setMode] = useState<AuthMode>(urlToken ? 'JOIN' : 'LOGIN');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [configError, setConfigError] = useState(false);
-  const [validatedInvite, setValidatedInvite] = useState<Invite | null>(null);
   const [invitedCompany, setInvitedCompany] = useState<Company | null>(null);
   
   const [form, setForm] = useState({ 
-    email: '', 
+    email: urlEmail || '', 
     password: '', 
     name: '', 
     companyName: '',
@@ -37,16 +39,21 @@ export const Login: React.FC = () => {
   
   const navigate = useNavigate();
 
-  // Validate invite code and fetch company info
+  useEffect(() => {
+    if (authUser && !loading) {
+      navigate('/');
+    }
+  }, [authUser, navigate, loading]);
+
   useEffect(() => {
     const checkToken = async () => {
       const tokenToVerify = form.manualToken || urlToken;
       if (tokenToVerify && (urlToken || form.manualToken.length > 5)) {
         try {
-          if (form.email.includes('@')) {
-            const inviteData = await validateInviteToken(tokenToVerify, form.email);
+          const emailToCheck = authUser?.email || form.email.trim().toLowerCase() || urlEmail;
+          if (emailToCheck && emailToCheck.includes('@')) {
+            const inviteData = await validateInviteToken(tokenToVerify, emailToCheck);
             if (inviteData) {
-              setValidatedInvite(inviteData);
               const companySnap = await getDoc(doc(db, 'companies', inviteData.companyId));
               if (companySnap.exists()) {
                 setInvitedCompany({ id: companySnap.id, ...companySnap.data() } as Company);
@@ -54,258 +61,262 @@ export const Login: React.FC = () => {
             }
           }
         } catch (e) {
-          console.error("Token validation error:", e);
+          console.debug("Invite validation context check failed:", e);
         }
       }
     };
     const timer = setTimeout(checkToken, 500);
     return () => clearTimeout(timer);
-  }, [form.manualToken, urlToken, form.email]);
+  }, [form.manualToken, urlToken, form.email, authUser, urlEmail]);
 
   const handleGoogleLogin = async () => {
     setLoading(true);
     setError('');
-    setConfigError(false);
     const provider = new GoogleAuthProvider();
     
     try {
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
-
       const activeToken = form.manualToken || urlToken;
       
-      if (mode === 'JOIN' || activeToken) {
-        // Check if the Google email matches the invitation email
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      
+      if (mode === 'JOIN' || (activeToken && !userDoc.exists())) {
         const inviteData = await validateInviteToken(activeToken || '', user.email || '');
         if (!inviteData) {
-          throw new Error(`Sorry, the invitation for ${user.email} is not valid or has expired.`);
+          throw new Error(`The invitation for ${user.email} is not valid or has already been used.`);
         }
-
-        // Set up the new user profile
-        await setDoc(doc(db, 'users', user.uid), {
-          uid: user.uid,
-          email: user.email?.toLowerCase(),
-          displayName: user.displayName || 'Team Member',
-          companyId: inviteData.companyId,
-          role: inviteData.role,
-          status: 'active',
-          createdAt: serverTimestamp()
-        }, { merge: true });
-
-        await acceptInvite(inviteData.id);
-      } else {
-        // Standard Google login for company owners
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (!userDoc.exists() && mode === 'SIGNUP') {
-          const companyRef = await addDoc(collection(db, 'companies'), {
-            name: form.companyName || `${user.displayName}'s Company`,
-            ownerId: user.uid,
-            plan: 'basic',
-            createdAt: serverTimestamp()
-          });
+        
+        if (!userDoc.exists()) {
           await setDoc(doc(db, 'users', user.uid), {
             uid: user.uid,
-            email: user.email?.toLowerCase(),
-            displayName: user.displayName || 'Owner',
-            companyId: companyRef.id,
-            role: UserRole.ADMIN,
+            email: user.email,
+            displayName: user.displayName || form.name,
+            companyId: inviteData.companyId,
+            role: inviteData.role,
             status: 'active',
             createdAt: serverTimestamp()
           });
+          await acceptInvite(inviteData.id);
         }
+      } else if (mode === 'SIGNUP' && !userDoc.exists()) {
+        const companyRef = await addDoc(collection(db, 'companies'), {
+          name: form.companyName || `${user.displayName}'s Team`,
+          ownerId: user.uid,
+          plan: 'basic',
+          createdAt: serverTimestamp()
+        });
+        
+        await setDoc(doc(db, 'users', user.uid), {
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName || form.name,
+          companyId: companyRef.id,
+          role: UserRole.ADMIN,
+          status: 'active',
+          createdAt: serverTimestamp()
+        });
       }
       navigate('/');
     } catch (err: any) {
-      if (err.code === 'auth/operation-not-allowed') {
-        setConfigError(true);
-        setError("System Error: Google Login is not enabled. Please enable it in your Firebase console.");
-      } else {
-        setError(err.message || "Something went wrong while logging in with Google.");
-      }
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (mode === 'JOIN') return; // Join mode is Google only
-
     setLoading(true);
     setError('');
 
     try {
       if (mode === 'LOGIN') {
         await signInWithEmailAndPassword(auth, form.email, form.password);
-      } else {
-        // Manual Sign Up for Owners
-        const userCred = await createUserWithEmailAndPassword(auth, form.email, form.password);
-        const { user } = userCred;
-
+      } else if (mode === 'SIGNUP') {
+        const { user } = await createUserWithEmailAndPassword(auth, form.email, form.password);
+        await updateProfile(user, { displayName: form.name });
+        
         const companyRef = await addDoc(collection(db, 'companies'), {
-          name: form.companyName || `${form.name}'s Company`,
+          name: form.companyName,
           ownerId: user.uid,
           plan: 'basic',
           createdAt: serverTimestamp()
         });
-
+        
         await setDoc(doc(db, 'users', user.uid), {
           uid: user.uid,
-          email: form.email.toLowerCase(),
+          email: user.email,
           displayName: form.name,
           companyId: companyRef.id,
           role: UserRole.ADMIN,
           status: 'active',
           createdAt: serverTimestamp()
         });
+      } else if (mode === 'JOIN') {
+        const activeToken = form.manualToken || urlToken;
+        const inviteData = await validateInviteToken(activeToken || '', form.email);
+        
+        if (!inviteData) {
+          throw new Error("Invalid or expired invitation token.");
+        }
 
+        const { user } = await createUserWithEmailAndPassword(auth, form.email, form.password);
         await updateProfile(user, { displayName: form.name });
+        
+        await setDoc(doc(db, 'users', user.uid), {
+          uid: user.uid,
+          email: user.email,
+          displayName: form.name,
+          companyId: inviteData.companyId,
+          role: inviteData.role,
+          status: 'active',
+          createdAt: serverTimestamp()
+        });
+        
+        await acceptInvite(inviteData.id);
       }
       navigate('/');
     } catch (err: any) {
-      setError(err.message || "We couldn't log you in. Please check your details.");
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-md p-10 rounded-[40px] border border-slate-100 shadow-2xl shadow-slate-200">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+      <div className="w-full max-w-[440px] animate-in fade-in zoom-in-95 duration-500">
         <div className="text-center mb-10">
-          <div className="w-14 h-14 bg-slate-900 rounded-2xl flex items-center justify-center text-white font-black text-3xl mx-auto mb-6 shadow-xl shadow-slate-100">S</div>
-          <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tighter">
-            {mode === 'JOIN' ? 'Join Team' : (mode === 'LOGIN' ? 'Welcome Back' : 'Create Account')}
-          </h1>
-          
-          {invitedCompany && (
-            <div className="mt-6 p-6 bg-emerald-50/50 rounded-3xl border border-emerald-100 animate-in fade-in zoom-in-95 duration-500">
-              <div className="flex flex-col items-center space-y-2">
-                <Building2 size={24} className="text-emerald-500" />
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-400">You've been invited to</p>
-                <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight">{invitedCompany.name}</h2>
+          <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center text-white font-black text-3xl shadow-2xl shadow-slate-200 mx-auto mb-6">
+            T
+          </div>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">Syncro Protocol</h1>
+          <p className="text-slate-400 font-black uppercase text-[10px] tracking-[0.4em] mt-3">Node Authentication System</p>
+        </div>
+
+        <div className="bg-white p-10 rounded-[40px] border border-slate-100 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.05)]">
+          {error && (
+            <div className="mb-8 p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-start space-x-3">
+              <AlertCircle className="text-rose-500 shrink-0 mt-0.5" size={18} />
+              <p className="text-[11px] font-black uppercase tracking-wider text-rose-700 leading-tight">{error}</p>
+            </div>
+          )}
+
+          {mode === 'JOIN' && invitedCompany && (
+            <div className="mb-8 p-4 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center space-x-4">
+              <Building2 className="text-indigo-600" size={24} />
+              <div>
+                <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Joining Organization</p>
+                <p className="text-sm font-black text-indigo-900">{invitedCompany.name}</p>
               </div>
             </div>
           )}
-        </div>
 
-        {error && (
-          <div className={`p-4 rounded-2xl text-[10px] font-black uppercase tracking-widest mb-6 flex items-start space-x-3 ${configError ? 'bg-amber-50 border border-amber-200 text-amber-700' : 'bg-rose-50 border border-rose-100 text-rose-600'}`}>
-            {configError ? <Settings2 size={16} className="shrink-0 mt-0.5" /> : <AlertCircle size={16} className="shrink-0 mt-0.5" />}
-            <span className="leading-relaxed">{error}</span>
-          </div>
-        )}
-
-        {mode === 'JOIN' ? (
-          <div className="space-y-6">
-            <div className="bg-slate-50 p-6 rounded-[24px] border border-slate-100 space-y-4">
-              <div className="flex items-center space-x-3 mb-2">
-                <ShieldCheck className="text-indigo-500" size={18} />
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Account Verification</span>
-              </div>
-              <p className="text-[11px] font-bold text-slate-500 leading-relaxed">
-                To join this team, please sign in with the Google account that matches the email you were invited with.
-              </p>
-              
-              {!urlToken && (
-                <div className="pt-2">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Invite Code</label>
-                  <input 
-                    type="text" 
-                    value={form.manualToken} 
-                    onChange={e => setForm({...form, manualToken: e.target.value})} 
-                    className="w-full px-6 py-3 bg-white border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-100 focus:border-indigo-200 transition-all font-mono text-center text-[10px]" 
-                    placeholder="Enter your invite code..." 
+          <form onSubmit={handleAuth} className="space-y-6">
+            {(mode === 'SIGNUP' || mode === 'JOIN') && (
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Operator Name</label>
+                <div className="relative">
+                  <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                  <input
+                    required
+                    type="text"
+                    value={form.name}
+                    onChange={e => setForm({ ...form, name: e.target.value })}
+                    className="w-full pl-12 pr-6 py-4 bg-slate-50 border border-transparent rounded-2xl focus:bg-white focus:ring-4 focus:ring-indigo-100 focus:border-indigo-200 transition-all outline-none font-bold text-sm"
+                    placeholder="John Doe"
                   />
                 </div>
-              )}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Email Endpoint</label>
+              <div className="relative">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                <input
+                  required
+                  type="email"
+                  value={form.email}
+                  onChange={e => setForm({ ...form, email: e.target.value })}
+                  className="w-full pl-12 pr-6 py-4 bg-slate-50 border border-transparent rounded-2xl focus:bg-white focus:ring-4 focus:ring-indigo-100 focus:border-indigo-200 transition-all outline-none font-bold text-sm"
+                  placeholder="name@company.com"
+                />
+              </div>
             </div>
 
-            <button 
-              onClick={handleGoogleLogin}
-              disabled={loading || (!urlToken && !form.manualToken)}
-              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black text-[11px] uppercase tracking-[0.2em] py-5 rounded-2xl transition-all shadow-xl shadow-slate-100 flex items-center justify-center space-x-3 active:scale-95 disabled:opacity-30"
+            {mode === 'SIGNUP' && (
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Organization Name</label>
+                <div className="relative">
+                  <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                  <input
+                    required
+                    type="text"
+                    value={form.companyName}
+                    onChange={e => setForm({ ...form, companyName: e.target.value })}
+                    className="w-full pl-12 pr-6 py-4 bg-slate-50 border border-transparent rounded-2xl focus:bg-white focus:ring-4 focus:ring-indigo-100 focus:border-indigo-200 transition-all outline-none font-bold text-sm"
+                    placeholder="Acme Corp"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Security Token (Password)</label>
+              <div className="relative">
+                <Key className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                <input
+                  required
+                  type="password"
+                  value={form.password}
+                  onChange={e => setForm({ ...form, password: e.target.value })}
+                  className="w-full pl-12 pr-6 py-4 bg-slate-50 border border-transparent rounded-2xl focus:bg-white focus:ring-4 focus:ring-indigo-100 focus:border-indigo-200 transition-all outline-none font-bold text-sm"
+                  placeholder="••••••••"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] shadow-xl shadow-slate-200 hover:bg-slate-800 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center space-x-3"
             >
-              {loading ? <RefreshCw className="animate-spin" size={18} /> : (
-                <>
-                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/0/google.svg" className="w-5 h-5" alt="Google" />
-                  <span>Sign in with Google to Join</span>
-                </>
-              )}
+              {loading ? <RefreshCw className="animate-spin" size={18} /> : <span>Execute {mode === 'LOGIN' ? 'Login' : mode === 'SIGNUP' ? 'Onboarding' : 'Join'}</span>}
             </button>
-            
-            <button 
-              onClick={() => setMode('LOGIN')}
-              className="w-full text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-colors py-2"
+          </form>
+
+          <div className="mt-8 relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-slate-100"></div>
+            </div>
+            <div className="relative flex justify-center text-[10px] font-black uppercase tracking-widest">
+              <span className="bg-white px-4 text-slate-300">Alternate Access</span>
+            </div>
+          </div>
+
+          <button
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            className="w-full mt-8 py-4 bg-white border border-slate-100 text-slate-600 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] shadow-sm hover:bg-slate-50 transition-all flex items-center justify-center space-x-3"
+          >
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-5 h-5" alt="Google" />
+            <span>Identity Provider</span>
+          </button>
+
+          <div className="mt-10 text-center">
+            <button
+              onClick={() => {
+                setError('');
+                setMode(mode === 'LOGIN' ? 'SIGNUP' : 'LOGIN');
+              }}
+              className="text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:text-indigo-800 transition-colors"
             >
-              Cancel and Go Back
+              {mode === 'LOGIN' ? 'Initialize New Workspace?' : 'Return to Node Login?'}
             </button>
           </div>
-        ) : (
-          <>
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {mode === 'SIGNUP' && (
-                <>
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Full Name</label>
-                    <div className="relative">
-                      <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-                      <input required type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full pl-12 pr-6 py-3.5 bg-slate-50 border border-transparent rounded-2xl outline-none focus:bg-white focus:ring-4 focus:ring-blue-100 focus:border-blue-200 transition-all font-bold" placeholder="e.g. Rick Sanchez" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Company Name</label>
-                    <input required type="text" value={form.companyName} onChange={e => setForm({...form, companyName: e.target.value})} className="w-full px-6 py-3.5 bg-slate-50 border border-transparent rounded-2xl focus:bg-white focus:ring-4 focus:ring-blue-100 focus:border-blue-200 transition-all font-bold" placeholder="e.g. Acme Corp" />
-                  </div>
-                </>
-              )}
-
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Email Address</label>
-                <input required type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} className="w-full px-6 py-3.5 bg-slate-50 border border-transparent rounded-2xl focus:bg-white focus:ring-4 focus:ring-blue-100 focus:border-blue-200 transition-all font-bold" placeholder="name@email.com" />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Password</label>
-                <input required type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})} className="w-full px-6 py-3.5 bg-slate-50 border border-transparent rounded-2xl focus:bg-white focus:ring-4 focus:ring-blue-100 focus:border-blue-200 transition-all font-bold" placeholder="••••••••" />
-              </div>
-
-              <button type="submit" disabled={loading} className="w-full bg-slate-900 hover:bg-slate-800 text-white font-black text-[11px] uppercase tracking-[0.2em] py-4 rounded-2xl transition-all shadow-xl shadow-slate-100 disabled:opacity-50 active:scale-95 mt-4">
-                {loading ? <RefreshCw className="mx-auto animate-spin" size={18} /> : (mode === 'LOGIN' ? 'Log In' : 'Sign Up')}
-              </button>
-            </form>
-
-            <div className="relative my-8">
-               <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-100"></div></div>
-               <div className="relative flex justify-center text-[10px] font-black uppercase text-slate-300"><span className="bg-white px-4 tracking-widest">or use</span></div>
-            </div>
-
-            <button 
-              onClick={handleGoogleLogin}
-              disabled={loading}
-              className="w-full bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-black text-[10px] uppercase tracking-widest py-4 rounded-2xl transition-all flex items-center justify-center space-x-3 active:scale-95"
-            >
-              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/0/google.svg" className="w-4 h-4" alt="Google" />
-              <span>Log in with Google</span>
-            </button>
-
-            <div className="mt-10 flex flex-col items-center space-y-3">
-              <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                {mode === 'LOGIN' ? "Need a workspace?" : "Already have an account?"}
-                <button onClick={() => setMode(mode === 'LOGIN' ? 'SIGNUP' : 'LOGIN')} className="ml-2 text-indigo-600 hover:underline">
-                  {mode === 'LOGIN' ? 'Register Now' : 'Log In'}
-                </button>
-              </div>
-              <button 
-                onClick={() => setMode('JOIN')}
-                className="flex items-center space-x-2 text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:text-indigo-700 transition-all"
-              >
-                <Sparkles size={12} className="animate-pulse" />
-                <span>Invited to a team? Join here</span>
-              </button>
-            </div>
-          </>
-        )}
+        </div>
       </div>
     </div>
   );
