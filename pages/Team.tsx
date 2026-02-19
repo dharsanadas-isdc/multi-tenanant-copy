@@ -221,7 +221,7 @@ export const Team: React.FC = () => {
                           title="Send Invitation via Email/Apps"
                           className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all shadow-md active:scale-90"
                         >
-                          {navigator.share ? <Share2 size={12} /> : <Send size={12} />}
+                          {typeof navigator.share !== 'undefined' ? <Share2 size={12} /> : <Send size={12} />}
                         </button>
                         <button 
                           onClick={() => copyInviteLink(person)}

@@ -1,6 +1,6 @@
 {
   "name": "Syncro - Multi-Tenant Project Management",
-  "description": "A scalable SaaS project management tool with full multi-tenancy, RBAC, Kanban boards, and real-time updates using Firebase and Firestore.",
+  "description": "A scalable SaaS project management tool with full multi-tenancy, RBAC, Kanban boards, and real-time updates using Firebase and Firestore. Optimized for Firebase Hosting with Vite build system.",
   "requestFramePermissions": [
     "camera"
   ]

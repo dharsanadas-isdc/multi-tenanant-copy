@@ -1,12 +1,26 @@
-
 {
   "name": "syncro-pm",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "npx -y http-server . -p 8080 --cors"
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "start": "vite"
   },
   "dependencies": {
-    "http-server": "^14.1.1"
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "date-fns": "^4.1.0",
+    "firebase": "^12.9.0",
+    "http-server": "^14.1.1",
+    "lucide-react": "^0.574.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.13.0",
+    "recharts": "^3.7.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
   }
 }

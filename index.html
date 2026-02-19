@@ -16,40 +16,9 @@
         ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
     </style>
-<script type="importmap">
-{
-  "imports": {
-    "recharts": "https://esm.sh/recharts@^3.7.0",
-    "firebase/": "https://esm.sh/firebase@^12.9.0/",
-    "lucide-react": "https://esm.sh/lucide-react@^0.564.0",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
-    "date-fns": "https://esm.sh/date-fns@^4.1.0",
-    "react-router-dom": "https://esm.sh/react-router-dom@^7.13.0",
-    "react/": "https://esm.sh/react@^19.2.4/",
-    "react": "https://esm.sh/react@^19.2.4"
-  }
-}
-</script>
 </head>
 <body class="bg-slate-50 text-slate-900">
     <div id="root"></div>
-    <!-- Explicitly load index.tsx to trigger application mount -->
-    <script type="module" src="./index.tsx"></script>
-
-    <!-- Firebase SDK Initialization Script -->
-    <script type="module">
-      import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";
-
-      const firebaseConfig = {
-        apiKey: "AIzaSyA06FZGJAaGf7ihU4vfsbBo0g5c5n9FIQ4",
-        authDomain: "trans-scheme-452408-r2.firebaseapp.com",
-        projectId: "trans-scheme-452408-r2",
-        storageBucket: "trans-scheme-452408-r2.firebasestorage.app",
-        messagingSenderId: "1067735875891",
-        appId: "1:1067735875891:web:826eed2cc1ab3eb1b93e46"
-      };
-
-      const app = initializeApp(firebaseConfig);
-    </script>
+    <script type="module" src="/index.tsx"></script>
 </body>
 </html>
